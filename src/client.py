@@ -95,13 +95,6 @@ class MCPClient:
         await self.exit_stack.aclose()
 
     async def interactive_loop(self,session_id:str):
-        """Run interactive command loop."""
-        print("\n🎯 Interactive MCP Client")
-        print("Commands:")
-        print("  list - List available tools")
-        print("  call <tool_name> [args] - Call a tool")
-        print("  quit - Exit the client")
-        print()
 
         # Add the initial task to the conversation
         self.messages.append(HumanMessage(content=f"Task: {self.task}\n\nWhat should be my first step?"))
