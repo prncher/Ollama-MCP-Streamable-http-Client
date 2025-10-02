@@ -10,7 +10,7 @@ name = "Ollama-MCP-Streamable-http-Client"
 version = "0.1.0"
 description = "MCP client using streamable http to communicate with MCP Server and uses Ollama agent and model"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Prince Cheruvathur", email = "prncher@gmail.com" },

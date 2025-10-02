@@ -238,11 +238,24 @@ class MCPClient:
                                 parameters["selector"] = pattern_match.group(0).strip('"')
                                 return {"tool": tool_name, "parameters": parameters}  
                         elif tool_name == "click_element":
-                            pattern_match = re.search(r'x":\s*([^,]*),.*\s*?"y":\s*([^,]*)', params_text)                          
+                            if "x" in params_text.lower() and "y" in params_text.lower():
+                                pattern_match = re.search(r'x":\s*([^,]*),.*\s*?"y":\s*([^,]*)', params_text)                          
+                                if pattern_match:
+                                    parameters["x"] = pattern_match.group(1)
+                                    parameters["y"] = pattern_match.group(2)
+                                    return {"tool": tool_name, "parameters": parameters}
+                            elif "coordinates" in params_text.lower():
+                                pattern_match = re.findall(r'\d+', params_text)                                  
+                                if pattern_match:
+                                    parameters["x"] = pattern_match[0]
+                                    parameters["y"] = pattern_match[1]
+                                    return {"tool": tool_name, "parameters": parameters}
+                        elif tool_name == "scroll_page" and "direction" in params_text.lower():
+                            pattern_match = re.search(r'(?<="direction": )\".+\"', params_text)                          
                             if pattern_match:
-                                parameters["x"] = pattern_match.group(1)
-                                parameters["y"] = pattern_match.group(2)
-                                return {"tool": tool_name, "parameters": parameters}  
+                                parameters["direction"] = pattern_match.group(0).strip('"')
+                                return {"tool": tool_name, "parameters": parameters}
+
                         elif tool_name == "take_screenshot" \
                             or tool_name == "get_page_content" :
                             parameters["session_id"] = session_id
@@ -260,18 +273,19 @@ class MCPClient:
             return None
 
 
-async def main():
+async def main():   
     server_url = 5600
     transport_type = "streamable-http"
     server_url = f"http://localhost:{server_url}/mcp"
 
-    print("🚀 Simple MCP Auth Client")
+    print("MCP Client using Ollama")
     print(f"Connecting to: {server_url}")
     print(f"Transport type: {transport_type}")
 
     parser = argparse.ArgumentParser(description="Interactive browser automation with Ollama")
-    parser.add_argument("task", nargs='?', help="Task description or path to task file")
+    parser.add_argument("task", nargs='?', help="Task description")
     args = parser.parse_args()
+    print(f"executing Task: {args.task}")
     if not args.task:
          args.task = "Navigate to Ollama's model library, analyze the page content, and extract information about the available models."
 
