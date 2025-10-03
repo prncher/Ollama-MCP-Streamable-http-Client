@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from mcp import ClientSession, StdioServerParameters, stdio_client
+from mcp import ClientSession
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from mcp.client.streamable_http import streamablehttp_client
@@ -32,16 +32,16 @@ class MCPClient:
         # Configure Ollama with optimized parameters
         self.llm = ChatOllama(
             model=ollama_model,
+            validate_model_on_init=True,
+            temperature=0.8,
             num_ctx=32000,  # Large context window for complex tasks
             base_url="http://localhost:11434",
-            temperature=0,  # Deterministic outputs for consistent automation
         )
         
         # Initialize conversation history for continuous context
         self.messages:list[SystemMessage|HumanMessage|AIMessage] = [
-            SystemMessage(content="""You are an expert browser automation assistant with advanced capabilities for web analysis and data extraction. 
-            You will be given access to browser automation tools and will help navigate websites, extract information, and perform tasks.
-            You should think step by step, explaining your reasoning, and then decide on the next action to take.
+            SystemMessage(content="""Use the browser automation tools and open required websites for extracting relevant information, and execute tasks.
+            Every step need to be well thought out and decide on the next procedure to be taken to execute the task.
             """)
         ]
         
@@ -88,17 +88,18 @@ class MCPClient:
                 raise
 
             # Run interactive loop
-            await self.interactive_loop(session_id)
+            await self.interactive_loop()
     async def cleanup(self):
         """Clean up resources"""
         logger.debug("Cleaning up resources")
         await self.exit_stack.aclose()
 
-    async def interactive_loop(self,session_id:str):
+    async def interactive_loop(self):
 
         # Add the initial task to the conversation
         self.messages.append(HumanMessage(content=f"Task: {self.task}\n\nWhat should be my first step?"))
 
+        session_id = None
         task_complete = False
             
         while not task_complete:
@@ -134,11 +135,11 @@ class MCPClient:
                     print(f"Parameters: {json.dumps(parameters, indent=2)}")
                     
                     result = await self.session.call_tool(tool_name, parameters)
-                    result_text = result.content[0].text # type: ignore
+                    result_text = f"session_id: {result.content[0].text}" # type: ignore
                     print(f"Result: {result_text}")
                     
                     # Store the session ID
-                    session_id = result_text
+                    session_id = result.content[0].text # type: ignore
                     
                 elif session_id and self.session:
                     # Update the session ID in the parameters
@@ -216,20 +217,6 @@ class MCPClient:
                             if url_match:
                                 parameters["url"] = url_match.group(0)
                                 return {"tool": tool_name, "parameters": parameters}
-                        elif tool_name == "get_dom_structure":
-                            parameters["max_depth"] = 3
-                            parameters["session_id"] = session_id
-                            return {"tool": tool_name, "parameters": parameters}
-                        elif tool_name == "extract_data":
-                            pattern_match = re.search(r'(?:)\[[\S\s]*\]', params_text)
-                            if pattern_match:
-                                parameters["pattern"] = pattern_match.group(0)
-                                return {"tool": tool_name, "parameters": parameters}
-                        elif tool_name == "click_selector" and  "selector" in params_text.lower():
-                            pattern_match = re.search(r'(?<="selector": )\".+\"', params_text)                          
-                            if pattern_match:
-                                parameters["selector"] = pattern_match.group(0).strip('"')
-                                return {"tool": tool_name, "parameters": parameters}  
                         elif tool_name == "click_element":
                             if "x" in params_text.lower() and "y" in params_text.lower():
                                 pattern_match = re.search(r'x":\s*([^,]*),.*\s*?"y":\s*([^,]*)', params_text)                          
@@ -243,12 +230,28 @@ class MCPClient:
                                     parameters["x"] = pattern_match[0]
                                     parameters["y"] = pattern_match[1]
                                     return {"tool": tool_name, "parameters": parameters}
+                        elif tool_name == "click_selector" and  "selector" in params_text.lower():
+                            pattern_match = re.search(r'(?<="selector": )\".+\"', params_text)                          
+                            if pattern_match:
+                                parameters["selector"] = pattern_match.group(0).strip('"')
+                                return {"tool": tool_name, "parameters": parameters}
+                        elif tool_name == "type_text" and '"text"' in params_text.lower():
+                            print(params_text)
+                            return {"tool": tool_name, "parameters": parameters} 
                         elif tool_name == "scroll_page" and "direction" in params_text.lower():
                             pattern_match = re.search(r'(?<="direction": )\".+\"', params_text)                          
                             if pattern_match:
                                 parameters["direction"] = pattern_match.group(0).strip('"')
                                 return {"tool": tool_name, "parameters": parameters}
-
+                        elif tool_name == "get_dom_structure":
+                            parameters["max_depth"] = 3
+                            parameters["session_id"] = session_id
+                            return {"tool": tool_name, "parameters": parameters}
+                        elif tool_name == "extract_data":
+                            pattern_match = re.search(r'(?:)\[[\S\s]*\]', params_text)
+                            if pattern_match:
+                                parameters["pattern"] = pattern_match.group(0)
+                                return {"tool": tool_name, "parameters": parameters}                       
                         elif tool_name == "take_screenshot" \
                             or tool_name == "get_page_content" :
                             parameters["session_id"] = session_id
