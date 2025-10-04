@@ -1,4 +1,4 @@
-![Title Image](https://raw.githubusercontent.com/prncher/Ollama-MCP-Streamable-http-Server/main/TitleImage.png)
+![Title Image](https://raw.githubusercontent.com/prncher/Ollama-MCP-Streamable-http-Client/main/TitleImage.png)
 
 # Building an MCP System with Streamable HTTP, Ollama, and Selenium
 
@@ -35,7 +35,7 @@ Here’s how the components fit together:
 5. **MCP Server → MCP Client**  
    The server streams logs, partial results, and final outputs back to the client in real time.  
 
-<img width="1536" height="1024" alt="image" src="https://raw.githubusercontent.com/prncher/Ollama-MCP-Streamable-http-Server/main/496902944-f4e132f4-9e7f-4d79-a057-b8dc0138b263.png" />
+<img width="1536" height="1024" alt="image" src="https://raw.githubusercontent.com/prncher/Ollama-MCP-Streamable-http-Client/main/496902944-f4e132f4-9e7f-4d79-a057-b8dc0138b263.png" />
 
 ---
 
