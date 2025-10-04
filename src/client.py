@@ -1,16 +1,20 @@
 import argparse
 import asyncio
+import base64
 from contextlib import AsyncExitStack
 from datetime import timedelta
+from io import BytesIO
 import json
 import logging
 import os
 from typing import Any, Dict, Optional
 
 from mcp import ClientSession
+from mcp.types import ImageContent
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from mcp.client.streamable_http import streamablehttp_client
+from PIL import Image
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +30,7 @@ class MCPClient:
         self.task = initial_task
         
         # Get Ollama model from environment variable or use default
-        ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
+        ollama_model = os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b")
         logger.info(f"Using Ollama model: {ollama_model}")
         
         # Configure Ollama with optimized parameters
@@ -60,15 +64,9 @@ class MCPClient:
             await self._run_session(read_stream, write_stream, get_session_id)
 
     async def _run_session(self, read_stream, write_stream, get_session_id):
-        """Run the MCP session with the given streams."""
-        print("🤝 Initializing MCP session...")
         async with ClientSession(read_stream, write_stream) as session:
             self.session = session
-            print("⚡ Starting session initialization...")
             await session.initialize()
-            print("✨ Session initialization complete!")
-
-            print(f"\n✅ Connected to MCP server at {self.server_url}")
             if get_session_id:
                 session_id = get_session_id()
                 if session_id:
@@ -79,16 +77,14 @@ class MCPClient:
                 self.tools = response.tools
                 print("\nConnected to server with tools:", [tool.name for tool in self.tools])
                 
-                # Add tools information to the system message
-                tools_info = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tools])
+                tools_info = "\n".join([f"- {tool.name}: {tool.description},'inputSchema':{tool.inputSchema}" for tool in self.tools])
                 self.messages[0] = SystemMessage(content=f"{self.messages[0].content}\n\nAvailable tools:\n{tools_info}")
             
             except Exception as e:
                 logger.error(f"Error listing tools: {str(e)}", exc_info=True)
                 raise
-
-            # Run interactive loop
             await self.interactive_loop()
+           
     async def cleanup(self):
         """Clean up resources"""
         logger.debug("Cleaning up resources")
@@ -108,7 +104,8 @@ class MCPClient:
                 print("\nSending current state to Ollama for analysis...")
                 response = await self.llm.ainvoke(self.messages)
                 print(f"\nOllama's analysis:\n{response.content}")
-                
+
+              
                 # Add Ollama's response to the conversation history
                 self.messages.append(AIMessage(content=response.content))
                 
@@ -140,7 +137,19 @@ class MCPClient:
                     
                     # Store the session ID
                     session_id = result.content[0].text # type: ignore
+                elif tool_name == "take_screenshot" and self.session:
+                    print(f"\nExecuting: {tool_name}")
+                    print(f"Parameters: {json.dumps(parameters, indent=2)}")
                     
+                    result = await self.session.call_tool(tool_name, parameters)
+                    resultImage:list[ImageContent] = result.content[0]
+                    result_text = f"Screenshot captured ({len(resultImage.data)} bytes). File processed and cleaned up for security."
+                    encoded_data = resultImage.data
+                    decoded_image_data = base64.b64decode(encoded_data)
+                    image_stream = BytesIO(decoded_image_data)
+                    image = Image.open(image_stream)
+                    image.show()          
+                    result_text = f"Screenshot saved. The browser window shows the current state of the page."
                 elif session_id and self.session:
                     # Update the session ID in the parameters
                     parameters["session_id"] = session_id
@@ -151,10 +160,7 @@ class MCPClient:
                     result = await self.session.call_tool(tool_name, parameters)
                     result_text = result.content[0].text # type: ignore
                     print(f"Result: {result_text}")
-                    
-                    # Special handling for screenshot results
-                    if tool_name == "take_screenshot":
-                        result_text = f"Screenshot saved. The browser window shows the current state of the page."
+
                 elif self.session:
                     print(f"\nExecuting: {tool_name}")
                     print(f"Parameters: {json.dumps(parameters, indent=2)}")
@@ -186,22 +192,46 @@ class MCPClient:
         Returns:
             Dictionary with tool name and parameters, or None if no valid action found
         """
+
         try:
-            # Look for JSON blocks in the response
-            json_pattern = r'```json\\s*([\\s\\S]*?)\\s*```'
             import re
-            json_matches = re.findall(json_pattern, response_text)
-            
-            if json_matches:
-                for json_str in json_matches:
-                    try:
-                        action = json.loads(json_str)
-                        if isinstance(action, dict) and "tool" in action and "parameters" in action:
-                            return action
-                    except json.JSONDecodeError:
-                        continue
-            
-            # If no JSON blocks, look for tool mentions in the text (only if tools are loaded)
+            content = response_text.replace("\n", "")
+            if "json" in content:
+                json_matches = re.findall(r'(?<=```json)(.+)```', content)
+                action = json.loads(json_matches[0])
+                if isinstance(action, dict):
+                    if "name" in action and "arguments" in action:
+                        return {
+                            "tool":action["name"],
+                            "parameters":action["arguments"]
+                        }
+                    elif "tool" in action and "parameters" in action:
+                        return action
+            elif "python" in content:
+                json_matches = re.findall(r'(?<=python)(.+)\)', content)
+                firstTool = json_matches[0]
+                index = firstTool.find('(')
+                if index != -1:
+                    action = {}
+                    action["tool"] = firstTool[:index]
+                    paramSection = firstTool[index+1:]
+                    index = paramSection.find(')')
+                    if index != -1:
+                        paramSection = paramSection[:index]
+                    paramMatches = re.findall(r'([^,]+)=([^,]+)', paramSection)
+                    params = {}
+                    for p in paramMatches:
+                        params[p[0].strip()] = p[1].strip('\"\'')
+                    action["parameters"] = params
+                    return action
+            elif "parameters" in content or "url" in content:
+                action = json.loads(content)
+                if isinstance(action, dict) and "tool" in action and "parameters" in action:
+                    return action
+        except json.JSONDecodeError:
+            print()
+
+        try:
             if hasattr(self, 'tools'):
                 tool_names = [tool.name for tool in self.tools]
                 for tool_name in tool_names:
@@ -209,6 +239,9 @@ class MCPClient:
                         # Try to extract parameters from the text
                         params_start = response_text.find(tool_name) + len(tool_name)
                         params_text = response_text[params_start:].strip()
+
+                        if tool_name != "launch_browser" and not session_id:
+                            return None
                         
                         # Simple heuristic to extract parameters
                         parameters = {}
@@ -269,7 +302,17 @@ class MCPClient:
             return None
 
 
-async def main():   
+async def main(): 
+#     import re
+#     response_text = 'I can see that I\'m on the main MDN page, and I can see there\'s a "Web APIs" section in the navigation. Let me navigate to the Web APIs section to find the HTML DOM API documentation:\n\n```python\nclick_selector(session_id="1906f31a608947cdeeb367b574e6d474", selector="a[href=\'/en-US/docs/Web/API\']")\n```'
+#  #   toolnameAndParamsMatch = re.search(r'(?<=python\\n).+\)', response_text)
+#     json_pattern = r'(.+)\)'
+#     json_matches = re.findall(json_pattern, response_text)
+#     for t in json_matches:
+#         print(t)
+#     toolnameAndParamsMatch = re.search(r'(?<=python\\n)(.+)\)', response_text)
+#     print(f"toolnameAndParamsMatch: {toolnameAndParamsMatch}")
+  
     server_url = 5600
     transport_type = "streamable-http"
     server_url = f"http://localhost:{server_url}/mcp"

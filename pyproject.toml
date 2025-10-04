@@ -28,7 +28,8 @@ classifiers = [
 dependencies = [
     "mcp>=1.0.0",
     "langchain-ollama>=0.3.0",
-    "langchain-core>=0.3.0"
+    "langchain-core>=0.3.0",
+    "Pillow>=11.0.0",
 ]
 
 [project.optional-dependencies]
