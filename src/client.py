@@ -30,7 +30,7 @@ class MCPClient:
         self.task = initial_task
         
         # Get Ollama model from environment variable or use default
-        ollama_model = os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b")
+        ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
         logger.info(f"Using Ollama model: {ollama_model}")
         
         # Configure Ollama with optimized parameters
@@ -142,9 +142,9 @@ class MCPClient:
                     print(f"Parameters: {json.dumps(parameters, indent=2)}")
                     
                     result = await self.session.call_tool(tool_name, parameters)
-                    resultImage:list[ImageContent] = result.content[0]
-                    result_text = f"Screenshot captured ({len(resultImage.data)} bytes). File processed and cleaned up for security."
-                    encoded_data = resultImage.data
+                    resultImage:list[ImageContent] = result.content[0] # type: ignore
+                    result_text = f"Screenshot captured ({len(resultImage.data)} bytes). File processed and cleaned up for security." # type: ignore
+                    encoded_data = resultImage.data # type: ignore
                     decoded_image_data = base64.b64decode(encoded_data)
                     image_stream = BytesIO(decoded_image_data)
                     image = Image.open(image_stream)
@@ -197,7 +197,7 @@ class MCPClient:
             import re
             content = response_text.replace("\n", "")
             if "json" in content:
-                json_matches = re.findall(r'(?<=```json)(.+)```', content)
+                json_matches = re.findall(r'(?<=```json).*?(?=```)', content)
                 action = json.loads(json_matches[0])
                 if isinstance(action, dict):
                     if "name" in action and "arguments" in action:
@@ -207,6 +207,11 @@ class MCPClient:
                         }
                     elif "tool" in action and "parameters" in action:
                         return action
+                    elif "tool" in action and "inputSchema" in action:
+                        return {
+                            "tool":action["tool"],
+                            "parameters": action["inputSchema"]
+                        }
             elif "python" in content:
                 json_matches = re.findall(r'(?<=python)(.+)\)', content)
                 firstTool = json_matches[0]
@@ -269,8 +274,23 @@ class MCPClient:
                                 parameters["selector"] = pattern_match.group(0).strip('"')
                                 return {"tool": tool_name, "parameters": parameters}
                         elif tool_name == "type_text" and '"text"' in params_text.lower():
-                            print(params_text)
-                            return {"tool": tool_name, "parameters": parameters} 
+                            content = response_text.replace("\n", "")
+                            json_pattern = r'(?<=```json).*?(?=})'
+                            json_matches = re.findall(json_pattern, content)
+                            action = json.loads(json_matches[0]+'}}')
+                            print(action)
+                            if "arguments" in action:
+                                return {
+                                    "tool":tool_name,
+                                    "parameters":action["arguments"]
+                                }
+                            elif "parameters" in action:
+                                return action
+                            elif "inputSchema" in action:
+                                return {
+                                    "tool":tool_name,
+                                    "parameters": action["inputSchema"]
+                                }
                         elif tool_name == "scroll_page" and "direction" in params_text.lower():
                             pattern_match = re.search(r'(?<="direction": )\".+\"', params_text)                          
                             if pattern_match:
@@ -304,12 +324,14 @@ class MCPClient:
 
 async def main(): 
 #     import re
-#     response_text = 'I can see that I\'m on the main MDN page, and I can see there\'s a "Web APIs" section in the navigation. Let me navigate to the Web APIs section to find the HTML DOM API documentation:\n\n```python\nclick_selector(session_id="1906f31a608947cdeeb367b574e6d474", selector="a[href=\'/en-US/docs/Web/API\']")\n```'
+#     response_text = '` tool to enter the search query and then simulate a click on the resulting link.\n   \n2. **Search and Click "HTML DOM API"**:\n   - Similarly, search for and click on the "HTML DOM API" section.\n\nLet\'s proceed with these steps:\n\n1. **Type Search Query for "Web APIs"**:\n   ```json\n   {\n     "tool": "type_text",\n     "inputSchema": {\n       "session_id": "cf4cf744576b53b20b0db4658915e3ff",\n       "text": "Web APIs"\n     }\n   }\n   ```\n\n2. **Click on the Resulting Link**:\n   - Assuming the search results are displayed and the first link is for "Web APIs", you can click it using its text content.\n   \n3. **Type Search Query for "HTML DOM API"**:\n   ```json\n   {\n     "tool": "type_text",\n     "inputSchema": {\n       "session_id": "cf4cf744576b53b20b0db4658915e3ff",\n       "text": "HTML DOM API"\n     }\n   }\n   ```\n\n4. **Click on the Resulting Link**:\n   - Similarly, click on the resulting link for "HTML DOM API".\n\nAfter these clicks, you should be on the HTML DOM API page. Now, you can extract its content using the `get_page_content` tool.\n\nHere is the command to get the page content:\n```json\n{\n  "tool": "get_page_content",\n  "inputSchema": {\n    "session_id": "cf4cf744576b53b20b0db4658915e3ff"\n  }\n}\n```\n\nProceed with these steps to navigate and extract the content from the MDN HTML DOM API page.'
+#     content = response_text.replace("\n", "")
 #  #   toolnameAndParamsMatch = re.search(r'(?<=python\\n).+\)', response_text)
-#     json_pattern = r'(.+)\)'
-#     json_matches = re.findall(json_pattern, response_text)
+#     json_pattern = r'(?<=```json).*?(?=})'
+#     json_matches = re.findall(json_pattern, content)
 #     for t in json_matches:
-#         print(t)
+#         action = json.loads(t+'}}')
+#         print(action)
 #     toolnameAndParamsMatch = re.search(r'(?<=python\\n)(.+)\)', response_text)
 #     print(f"toolnameAndParamsMatch: {toolnameAndParamsMatch}")
   
